@@ -244,6 +244,16 @@ public class FloatingWindowService extends Service {
         return isRunning && instance != null;
     }
 
+    /**
+     * 外部通知功能状态变化，用于同步按钮外观（例如无障碍服务自动关闭时）。
+     */
+    public static void notifyFunctionState(boolean enabled) {
+        FloatingWindowService service = instance;
+        if (service != null) {
+            service.updateButtonAppearance(enabled);
+        }
+    }
+
     public static void stopService(Context context) {
         if (context == null) return;
         Intent intent = new Intent(context, FloatingWindowService.class);
