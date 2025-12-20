@@ -27,6 +27,7 @@ public class FloatingWindowService extends Service {
 
     private static final String TAG = "Miao3trikeFloat";
     private static final String CHANNEL_ID = "miao3trike_foreground";
+    private static final int CAPTURE_COLOR = 0xFFFF9800;
 
     private WindowManager windowManager;
     private View floatingView;
@@ -35,6 +36,7 @@ public class FloatingWindowService extends Service {
 
     private static volatile boolean isRunning = false;
     private static FloatingWindowService instance;
+    private static volatile boolean captureActive = false;
 
     @Nullable
     @Override
@@ -209,6 +211,10 @@ public class FloatingWindowService extends Service {
 
     private void toggleFunction() {
         try {
+            if (VolumeKeyAccessibilityService.isClickCaptureInProgress()) {
+                VolumeKeyAccessibilityService.cancelClickCapture("float_click");
+                return;
+            }
             boolean current = VolumeKeyAccessibilityService.isFunctionEnabled();
             boolean newState = !current;
             VolumeKeyAccessibilityService.setFunctionEnabled(newState);
@@ -226,7 +232,10 @@ public class FloatingWindowService extends Service {
         floatingButton.clearColorFilter();
         floatingButton.setBackground(null);
 
-        if (enabled) {
+        if (captureActive) {
+            floatingButton.setImageResource(R.drawable.ic_float_off);
+            floatingButton.setColorFilter(CAPTURE_COLOR);
+        } else if (enabled) {
             floatingButton.setImageResource(R.drawable.ic_float_on);
         } else {
             floatingButton.setImageResource(R.drawable.ic_float_off);
@@ -251,6 +260,14 @@ public class FloatingWindowService extends Service {
         FloatingWindowService service = instance;
         if (service != null) {
             service.updateButtonAppearance(enabled);
+        }
+    }
+
+    public static void notifyCaptureState(boolean active) {
+        captureActive = active;
+        FloatingWindowService service = instance;
+        if (service != null) {
+            service.updateButtonAppearance(VolumeKeyAccessibilityService.isFunctionEnabled());
         }
     }
 

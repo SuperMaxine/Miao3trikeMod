@@ -14,6 +14,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -47,6 +48,10 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private static final float BUTTON_MARKER_RADIUS_DP = 10f;
     private static final float BUTTON_MARKER_TOUCH_RADIUS_DP = 26f;
 
+    private static final int RECORDING_MODE_NONE = 0;
+    private static final int RECORDING_MODE_DRAG = 1;
+    private static final int RECORDING_MODE_CLICK = 2;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private WindowManager overlayWindowManager;
@@ -54,6 +59,7 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private WindowManager.LayoutParams overlayParams;
 
     private MacroState macroState;
+    private ClickMacroState clickMacroState;
 
     private float buttonCenterX;
     private float buttonCenterY;
@@ -68,6 +74,11 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private float currentY;
     private boolean showArrow = false;
     private long dragStartTime;
+
+    private int recordingMode = RECORDING_MODE_NONE;
+    private boolean clickCaptureActive = false;
+    private boolean clickMacroRunning = false;
+    private boolean resumeDragAfterClickCapture = false;
 
     @Override
     public void onCreate() {
@@ -92,6 +103,25 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         // 未使用
     }
 
+    @Override
+    protected boolean onKeyEvent(KeyEvent event) {
+        if (event == null) return false;
+        if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP
+                && event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (macroState != null) {
+                Log.d(TAG, "Ignore volume+ while drag macro running");
+                return true;
+            }
+            if (isClickCaptureInProgressInternal()) {
+                cancelClickCaptureInternal("volume_key_cancel");
+                return true;
+            }
+            startClickCaptureOverlay();
+            return true;
+        }
+        return super.onKeyEvent(event);
+    }
+
     /**
     * 开关由浮窗控制；开启时进入录制待机，关闭时清理。
     */
@@ -112,10 +142,25 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         return instance;
     }
 
+    public static boolean isClickCaptureInProgress() {
+        VolumeKeyAccessibilityService svc = instance;
+        return svc != null && svc.isClickCaptureInProgressInternal();
+    }
+
+    public static void cancelClickCapture(String reason) {
+        VolumeKeyAccessibilityService svc = instance;
+        if (svc != null) {
+            svc.cancelClickCaptureInternal(reason);
+        }
+    }
+
     private void onFunctionStateChanged(boolean enabled) {
         if (enabled) {
             startRecordingOverlay();
         } else {
+            if (isClickCaptureInProgressInternal()) {
+                cancelClickCaptureInternal("function_disabled");
+            }
             cancelMacroIfRunning("disabled");
             removeOverlay();
             recordingActive = false;
@@ -172,6 +217,7 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         try {
             overlayWindowManager.addView(overlayView, overlayParams);
             Log.d(TAG, "Recording overlay added");
+            recordingMode = RECORDING_MODE_DRAG;
         } catch (Exception e) {
             Log.e(TAG, "Failed to add overlay", e);
             overlayView = null;
@@ -189,9 +235,83 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         }
         overlayView = null;
         overlayParams = null;
+        recordingMode = RECORDING_MODE_NONE;
+    }
+
+    private void startClickCaptureOverlay() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.e(TAG, "Click capture requires API 24+, current=" + Build.VERSION.SDK_INT);
+            return;
+        }
+        if (isClickCaptureInProgressInternal()) return;
+
+        resumeDragAfterClickCapture = functionEnabled;
+        clickCaptureActive = true;
+        clickMacroRunning = false;
+        recordingActive = false;
+        showArrow = false;
+
+        if (overlayView != null) {
+            recordingMode = RECORDING_MODE_CLICK;
+            if (overlayView != null) overlayView.invalidate();
+            FloatingWindowService.notifyCaptureState(true);
+            Log.d(TAG, "Click capture overlay reused");
+            return;
+        }
+
+        overlayWindowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        if (overlayWindowManager == null) {
+            Log.e(TAG, "WindowManager null, cannot start click capture overlay");
+            clickCaptureActive = false;
+            return;
+        }
+
+        PointF initialButtonCenter = computeButtonCenter();
+        buttonCenterX = initialButtonCenter.x;
+        buttonCenterY = initialButtonCenter.y;
+
+        overlayView = new RecordingOverlayView(this);
+        overlayView.setOnTouchListener(this::handleOverlayTouch);
+
+        int type;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        } else {
+            type = WindowManager.LayoutParams.TYPE_PHONE;
+        }
+
+        overlayParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+        );
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            overlayParams.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+
+        try {
+            overlayWindowManager.addView(overlayView, overlayParams);
+            recordingMode = RECORDING_MODE_CLICK;
+            FloatingWindowService.notifyCaptureState(true);
+            Log.d(TAG, "Click capture overlay added");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to add click capture overlay", e);
+            overlayView = null;
+            overlayParams = null;
+            clickCaptureActive = false;
+        }
     }
 
     private boolean handleOverlayTouch(View v, MotionEvent event) {
+        if (recordingMode == RECORDING_MODE_CLICK) {
+            return handleClickCaptureTouch(event);
+        }
         if (!functionEnabled) return false;
 
         switch (event.getActionMasked()) {
@@ -276,6 +396,42 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
             default:
                 return false;
         }
+    }
+
+    private boolean handleClickCaptureTouch(MotionEvent event) {
+        if (!clickCaptureActive) return false;
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (event.getPointerCount() != 1) return false;
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (event.getPointerCount() != 1) {
+                    cancelClickCaptureInternal("click_multi_pointer");
+                    return true;
+                }
+                PointF clickPoint = new PointF(event.getRawX(), event.getRawY());
+                completeClickCapture(clickPoint);
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                cancelClickCaptureInternal("click_cancel");
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void completeClickCapture(PointF clickPoint) {
+        clickCaptureActive = false;
+        clickMacroRunning = true;
+        showArrow = false;
+        if (overlayView != null) overlayView.invalidate();
+
+        deactivateOverlayForMacro();
+        PointF buttonCenter = computeButtonCenter();
+        runClickMacroSequence(buttonCenter, clickPoint);
     }
 
     private void failThisRound(String reason) {
@@ -422,10 +578,74 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         handler.postDelayed(state.startRunnable, state.startupDelayMs);
     }
 
+    private void runClickMacroSequence(PointF buttonCenter, PointF clickPoint) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.e(TAG, "Click macro requires API 24+, current=" + Build.VERSION.SDK_INT);
+            abortClickMacro("api_too_low_click");
+            return;
+        }
+        cancelClickMacroIfRunning("restart");
+        MacroConfig.MacroDelays delays = MacroConfig.load(this);
+        ClickMacroState state = new ClickMacroState(buttonCenter, clickPoint, delays);
+        clickMacroState = state;
+        state.timeoutRunnable = () -> abortClickMacro("timeout");
+        handler.postDelayed(state.timeoutRunnable, MACRO_TIMEOUT_MS);
+
+        Log.d(TAG, "Run click macro: startDelay=" + state.startupDelayMs + "ms, stepDelay=" + state.stepDelayMs
+                + "ms, tap=" + buttonCenter + " -> " + clickPoint + " -> " + buttonCenter);
+
+        state.startRunnable = () -> {
+            if (clickMacroState != state) return;
+            state.afterTap1Fallback = () -> clickMacroTapTarget(state, "tap1_fallback");
+            dispatchTap(buttonCenter, new GestureCallbackAdapter(
+                    () -> clickMacroTapTarget(state, "tap1_completed"),
+                    () -> abortClickMacro("tap1_cancelled")
+            ));
+            handler.postDelayed(state.afterTap1Fallback, TAP_DURATION_MS + 200);
+        };
+        handler.postDelayed(state.startRunnable, state.startupDelayMs);
+    }
+
+    private void clickMacroTapTarget(ClickMacroState state, String trigger) {
+        if (clickMacroState != state || state.tap1Done) return;
+        state.tap1Done = true;
+        if (state.afterTap1Fallback != null) handler.removeCallbacks(state.afterTap1Fallback);
+
+        handler.postDelayed(() -> {
+            if (clickMacroState != state) return;
+            state.afterTap2Fallback = () -> clickMacroTapButtonEnd(state, "tap2_fallback");
+            dispatchTap(state.clickPoint, new GestureCallbackAdapter(
+                    () -> clickMacroTapButtonEnd(state, "tap2_completed"),
+                    () -> abortClickMacro("tap2_cancelled")
+            ));
+            handler.postDelayed(state.afterTap2Fallback, TAP_DURATION_MS + 200);
+        }, state.stepDelayMs);
+    }
+
+    private void clickMacroTapButtonEnd(ClickMacroState state, String trigger) {
+        if (clickMacroState != state || state.tap2Done) return;
+        state.tap2Done = true;
+        if (state.afterTap2Fallback != null) handler.removeCallbacks(state.afterTap2Fallback);
+
+        handler.postDelayed(() -> {
+            if (clickMacroState != state) return;
+            state.afterTap3Fallback = this::finishClickMacro;
+            dispatchTap(state.buttonCenter, new GestureCallbackAdapter(
+                    this::finishClickMacro,
+                    () -> abortClickMacro("tap3_cancelled")
+            ));
+            handler.postDelayed(state.afterTap3Fallback, TAP_DURATION_MS + 200);
+        }, state.stepDelayMs);
+    }
+
     @TargetApi(Build.VERSION_CODES.N)
     private void dispatchTap(PointF point, GestureResultCallback result) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            failThisRound("api_too_low_tap");
+            if (clickMacroRunning) {
+                abortClickMacro("api_too_low_tap");
+            } else {
+                failThisRound("api_too_low_tap");
+            }
             return;
         }
         Path path = new Path();
@@ -439,7 +659,11 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         boolean dispatched = dispatchGesture(gesture, result, null);
         Log.d(TAG, "dispatchTap dispatched=" + dispatched + " to " + point);
         if (!dispatched) {
-            failThisRound("gesture_dispatch_failed_tap");
+            if (clickMacroRunning) {
+                abortClickMacro("gesture_dispatch_failed_tap");
+            } else {
+                failThisRound("gesture_dispatch_failed_tap");
+            }
         }
     }
 
@@ -477,6 +701,24 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         setFunctionEnabled(false);
     }
 
+    private boolean isClickCaptureInProgressInternal() {
+        return clickCaptureActive || clickMacroRunning;
+    }
+
+    private void cancelClickCaptureInternal(String reason) {
+        if (!isClickCaptureInProgressInternal()) return;
+        Log.d(TAG, "Click capture cancelled: " + reason);
+        clickCaptureActive = false;
+        clickMacroRunning = false;
+        cancelClickMacroIfRunning(reason);
+        FloatingWindowService.notifyCaptureState(false);
+        removeOverlay();
+        if (resumeDragAfterClickCapture && functionEnabled) {
+            startRecordingOverlay();
+        }
+        resumeDragAfterClickCapture = false;
+    }
+
     private void abortMacro(String reason) {
         Log.w(TAG, "Macro aborted: " + reason);
         cancelMacroIfRunning(reason);
@@ -493,6 +735,41 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         if (state.afterDragFallback != null) handler.removeCallbacks(state.afterDragFallback);
         if (state.finishFallback != null) handler.removeCallbacks(state.finishFallback);
         macroState = null;
+    }
+
+    private void abortClickMacro(String reason) {
+        Log.w(TAG, "Click macro aborted: " + reason);
+        cancelClickMacroIfRunning(reason);
+        clickMacroRunning = false;
+        FloatingWindowService.notifyCaptureState(false);
+        removeOverlay();
+        if (resumeDragAfterClickCapture && functionEnabled) {
+            startRecordingOverlay();
+        }
+        resumeDragAfterClickCapture = false;
+    }
+
+    private void finishClickMacro() {
+        cancelClickMacroIfRunning("finished");
+        clickMacroRunning = false;
+        FloatingWindowService.notifyCaptureState(false);
+        removeOverlay();
+        if (resumeDragAfterClickCapture && functionEnabled) {
+            startRecordingOverlay();
+        }
+        resumeDragAfterClickCapture = false;
+    }
+
+    private void cancelClickMacroIfRunning(String reason) {
+        ClickMacroState state = clickMacroState;
+        if (state == null) return;
+        Log.d(TAG, "Cancel click macro: " + reason);
+        if (state.timeoutRunnable != null) handler.removeCallbacks(state.timeoutRunnable);
+        if (state.startRunnable != null) handler.removeCallbacks(state.startRunnable);
+        if (state.afterTap1Fallback != null) handler.removeCallbacks(state.afterTap1Fallback);
+        if (state.afterTap2Fallback != null) handler.removeCallbacks(state.afterTap2Fallback);
+        if (state.afterTap3Fallback != null) handler.removeCallbacks(state.afterTap3Fallback);
+        clickMacroState = null;
     }
 
     private void macroStartDragHoldOnce(MacroState state, String trigger) {
@@ -671,6 +948,29 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 return;
             }
             setFunctionEnabled(false);
+        }
+    }
+
+    private static class ClickMacroState {
+        final PointF buttonCenter;
+        final PointF clickPoint;
+        final long startupDelayMs;
+        final long stepDelayMs;
+
+        boolean tap1Done = false;
+        boolean tap2Done = false;
+
+        Runnable timeoutRunnable;
+        Runnable startRunnable;
+        Runnable afterTap1Fallback;
+        Runnable afterTap2Fallback;
+        Runnable afterTap3Fallback;
+
+        ClickMacroState(PointF buttonCenter, PointF clickPoint, MacroConfig.MacroDelays delays) {
+            this.buttonCenter = buttonCenter;
+            this.clickPoint = clickPoint;
+            this.startupDelayMs = delays.startupDelayMs;
+            this.stepDelayMs = delays.stepDelayMs;
         }
     }
 

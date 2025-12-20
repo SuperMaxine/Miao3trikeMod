@@ -66,3 +66,6 @@ TODO 列表（Miao3trike 宏录制改造）
 
 17) 同步上游 README 并推送到 fork
     - ✅ 获取上游最新 README，完全替换本地 `README.md`，提交后推送到 `git@github.com:SuperMaxine/Miao3trikeMod.git`。（已同步 upstream/main）
+
+18) 音量+点击捕获宏（新功能）
+    - ✅ 音量+触发点击位置录制：显示 overlay 捕获单点；录制时音量+或浮窗点击可退出；宏执行顺序为按钮→点击点→按钮，步骤间延迟共用配置；浮窗显示为“未激活但不同配色”区分状态。

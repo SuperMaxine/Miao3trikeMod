@@ -18,3 +18,4 @@ local.properties
 *.keystore
 **/*.jks
 **/*.keystore
+/OriginalDesign.md
