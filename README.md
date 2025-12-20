@@ -6,9 +6,9 @@
   <p align="center">
     Miao3trike：一个明日方舟手机版划火柴小工具
     <br />
-    <a href="https://github.com/ESHIWU/Miao3trike/issues">报告 Bug</a>
+    <a href="https://github.com/SuperMaxine/Miao3trikeMod/issues">报告 Bug</a>
     ·
-    <a href="https://github.com/ESHIWU/Miao3trike/pulls">发起请求</a>
+    <a href="https://github.com/SuperMaxine/Miao3trikeMod/pulls">发起请求</a>
   </p>
 
   <p align="center">
