@@ -28,6 +28,11 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private static VolumeKeyAccessibilityService instance;
     private static boolean functionEnabled = false;
 
+    private static final String PREFS_NAME = "miao3trike_prefs";
+    private static final String PREF_KEY_BUTTON_CENTER_CUSTOMIZED = "button_center_customized";
+    private static final String PREF_KEY_BUTTON_CENTER_X = "button_center_x";
+    private static final String PREF_KEY_BUTTON_CENTER_Y = "button_center_y";
+
     // 坐标比例（基于 1920x1080 给定点计算得到）
     private static final float BUTTON_CENTER_RX = 0.9370f;
     private static final float BUTTON_CENTER_RY = 0.0745f;
@@ -43,6 +48,9 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private static final long MACRO_HOLD_AT_END_MS = 500L;
     private static final long MACRO_TIMEOUT_MS = 5000L;
 
+    private static final float BUTTON_MARKER_RADIUS_DP = 10f;
+    private static final float BUTTON_MARKER_TOUCH_RADIUS_DP = 26f;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private WindowManager overlayWindowManager;
@@ -50,6 +58,12 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private WindowManager.LayoutParams overlayParams;
 
     private MacroState macroState;
+
+    private float buttonCenterX;
+    private float buttonCenterY;
+    private boolean draggingButtonCenter = false;
+    private float buttonCenterDragOffsetX;
+    private float buttonCenterDragOffsetY;
 
     private boolean recordingActive = false;
     private float startX;
@@ -130,6 +144,10 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
             return;
         }
 
+        PointF initialButtonCenter = computeButtonCenter();
+        buttonCenterX = initialButtonCenter.x;
+        buttonCenterY = initialButtonCenter.y;
+
         overlayView = new RecordingOverlayView(this);
         overlayView.setOnTouchListener(this::handleOverlayTouch);
 
@@ -183,9 +201,21 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 if (event.getPointerCount() != 1) return false;
+                float downX = event.getRawX();
+                float downY = event.getRawY();
+                if (isTouchNearButtonCenter(downX, downY)) {
+                    draggingButtonCenter = true;
+                    recordingActive = false;
+                    showArrow = false;
+                    buttonCenterDragOffsetX = buttonCenterX - downX;
+                    buttonCenterDragOffsetY = buttonCenterY - downY;
+                    if (overlayView != null) overlayView.invalidate();
+                    Log.d(TAG, "Button center drag start x=" + buttonCenterX + ", y=" + buttonCenterY);
+                    return true;
+                }
                 recordingActive = true;
-                startX = event.getRawX();
-                startY = event.getRawY();
+                startX = downX;
+                startY = downY;
                 currentX = startX;
                 currentY = startY;
                 showArrow = true;
@@ -194,6 +224,12 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 Log.d(TAG, "Drag start x=" + startX + ", y=" + startY);
                 return true;
             case MotionEvent.ACTION_MOVE:
+                if (draggingButtonCenter) {
+                    float moveX = event.getRawX() + buttonCenterDragOffsetX;
+                    float moveY = event.getRawY() + buttonCenterDragOffsetY;
+                    setButtonCenter(moveX, moveY, false);
+                    return true;
+                }
                 if (recordingActive) {
                     currentX = event.getRawX();
                     currentY = event.getRawY();
@@ -201,6 +237,14 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 }
                 return recordingActive;
             case MotionEvent.ACTION_UP:
+                if (draggingButtonCenter) {
+                    draggingButtonCenter = false;
+                    float upX = event.getRawX() + buttonCenterDragOffsetX;
+                    float upY = event.getRawY() + buttonCenterDragOffsetY;
+                    setButtonCenter(upX, upY, true);
+                    Log.d(TAG, "Button center saved x=" + buttonCenterX + ", y=" + buttonCenterY);
+                    return true;
+                }
                 if (!recordingActive) return false;
                 if (event.getPointerCount() != 1) {
                     failThisRound("multi_pointer");
@@ -226,6 +270,11 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
+                if (draggingButtonCenter) {
+                    draggingButtonCenter = false;
+                    if (overlayView != null) overlayView.invalidate();
+                    return true;
+                }
                 failThisRound("cancel");
                 return true;
             default:
@@ -258,9 +307,74 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
 
     private PointF computeButtonCenter() {
         DisplayMetrics metrics = getResources().getDisplayMetrics();
+        PointF customized = readCustomizedButtonCenter(metrics);
+        if (customized != null) {
+            return customized;
+        }
         float x = BUTTON_CENTER_RX * metrics.widthPixels;
         float y = BUTTON_CENTER_RY * metrics.heightPixels;
         return new PointF(x, y);
+    }
+
+    private PointF readCustomizedButtonCenter(DisplayMetrics metrics) {
+        try {
+            boolean customized = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getBoolean(PREF_KEY_BUTTON_CENTER_CUSTOMIZED, false);
+            if (!customized) return null;
+            float x = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getFloat(PREF_KEY_BUTTON_CENTER_X, -1f);
+            float y = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getFloat(PREF_KEY_BUTTON_CENTER_Y, -1f);
+            if (x < 0f || y < 0f) return null;
+            float maxX = Math.max(0f, metrics.widthPixels - 1f);
+            float maxY = Math.max(0f, metrics.heightPixels - 1f);
+            float clampedX = clamp(x, 0f, maxX);
+            float clampedY = clamp(y, 0f, maxY);
+            return new PointF(clampedX, clampedY);
+        } catch (Exception e) {
+            Log.w(TAG, "readCustomizedButtonCenter failed", e);
+            return null;
+        }
+    }
+
+    private void persistButtonCenter(float x, float y) {
+        try {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(PREF_KEY_BUTTON_CENTER_CUSTOMIZED, true)
+                    .putFloat(PREF_KEY_BUTTON_CENTER_X, x)
+                    .putFloat(PREF_KEY_BUTTON_CENTER_Y, y)
+                    .apply();
+        } catch (Exception e) {
+            Log.w(TAG, "persistButtonCenter failed", e);
+        }
+    }
+
+    private void setButtonCenter(float x, float y, boolean persist) {
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        float maxX = Math.max(0f, metrics.widthPixels - 1f);
+        float maxY = Math.max(0f, metrics.heightPixels - 1f);
+        buttonCenterX = clamp(x, 0f, maxX);
+        buttonCenterY = clamp(y, 0f, maxY);
+        if (overlayView != null) overlayView.invalidate();
+        if (persist) {
+            persistButtonCenter(buttonCenterX, buttonCenterY);
+        }
+    }
+
+    private boolean isTouchNearButtonCenter(float rawX, float rawY) {
+        float dx = rawX - buttonCenterX;
+        float dy = rawY - buttonCenterY;
+        float r = dpToPx(BUTTON_MARKER_TOUCH_RADIUS_DP);
+        return (dx * dx + dy * dy) <= (r * r);
+    }
+
+    private float dpToPx(float dp) {
+        return dp * getResources().getDisplayMetrics().density;
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private void runMacroSequence(PointF buttonCenter, PointF dragStart, PointF dragEnd) {
@@ -556,6 +670,8 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private class RecordingOverlayView extends View {
         private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint markerFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint markerRingPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         RecordingOverlayView(android.content.Context context) {
             super(context);
@@ -566,14 +682,25 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
 
             circlePaint.setColor(0xAAFFC107);
             circlePaint.setStyle(Paint.Style.FILL);
+
+            markerFillPaint.setColor(0xCC00BCD4);
+            markerFillPaint.setStyle(Paint.Style.FILL);
+
+            markerRingPaint.setColor(0xEE00BCD4);
+            markerRingPaint.setStyle(Paint.Style.STROKE);
+            markerRingPaint.setStrokeWidth(dpToPx(2.5f));
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            if (!recordingActive && !showArrow) {
-                return;
-            }
+            // 按钮中心指示点：可拖动，用于校准点击坐标（适配非 16:9）。
+            float markerR = dpToPx(BUTTON_MARKER_RADIUS_DP);
+            float ringR = markerR + dpToPx(draggingButtonCenter ? 10f : 6f);
+            canvas.drawCircle(buttonCenterX, buttonCenterY, ringR, markerRingPaint);
+            canvas.drawCircle(buttonCenterX, buttonCenterY, markerR, markerFillPaint);
+
+            if (!recordingActive && !showArrow) return;
             float sx = startX;
             float sy = startY;
             float ex = currentX;

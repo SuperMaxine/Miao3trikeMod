@@ -51,3 +51,6 @@ TODO 列表（Miao3trike 宏录制改造）
     - ☐ 技术验证：`dispatchGesture` 继续笔画（`StrokeDescription` 的 `willContinue` / `continueStroke`）能否在目标机型上稳定“按住不松手”
     - ☐ 技术验证：在“按住不松手”期间执行 `performGlobalAction(GLOBAL_ACTION_BACK)` 是否会导致手势被系统取消（从而等效松手）
     - ☐ 设计回退策略：任一步失败/取消时如何清理状态（overlay/开关/回调）并提示用户重试
+
+13) 按钮中心校准（适配非 16:9）
+    - ✅ 将按钮中心指示点改为可拖动；用户拖动后持久化保存坐标（SharedPreferences），后续宏点击优先使用自定义坐标；未设置时继续用 rx/ry 初始推导。
