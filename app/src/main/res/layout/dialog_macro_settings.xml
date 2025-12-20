@@ -29,7 +29,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="启动延迟"
+                android:text="启动延迟（不要太小，容易划失败）"
                 android:textColor="#FFFFFF"
                 android:textSize="14sp" />
 
@@ -65,7 +65,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="步骤间延迟"
+                android:text="每步操作之间的延迟"
                 android:textColor="#FFFFFF"
                 android:textSize="14sp" />
 
