@@ -15,7 +15,7 @@
     <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=flat-square&logo=android" alt="Platform" />
     <img src="https://img.shields.io/badge/Language-Kotlin%20%2F%20Java-purple?style=flat-square&logo=kotlin" alt="Language" />
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
-    <img src="https://img.shields.io/github/stars/ESHIWU/Miao3trike?style=social" alt="Stars" />
+    <img src="https://img.shields.io/github/stars/SuperMaxine/Miao3trikeMod?style=social" alt="Stars" />
   </p>
 </div>
 
@@ -23,8 +23,8 @@
 
 ## 📖 简介 (Introduction)
 
-**Miao3trike** 是一个基于 Android 的应用。
-它的设计初衷是解决明日方舟手机版划火柴不易的问题。通过无障碍功能，映射到音量键以实现触发闪回。
+**Miao3trikeMod** 是一个基于 **Miao3trike** Android 应用。
+使用更激进的无障碍模拟操作，替代人工划火柴、零帧撤退与放技能、逐帧步进。并且提供操作间延迟调整选项，极限可以于80ms内稳定划出火柴。
 
 ## 📸 界面预览 (Screenshots)
 
