@@ -135,16 +135,26 @@ public class MainActivity extends AppCompatActivity {
 
         EditText etStartup = content.findViewById(R.id.et_startup_delay);
         EditText etStep = content.findViewById(R.id.et_step_delay);
+        EditText etStepMacro = content.findViewById(R.id.et_step_macro_delay);
         EditText etDrag = content.findViewById(R.id.et_drag_speed);
         EditText etHold = content.findViewById(R.id.et_hold_delay);
+        SwitchCompat switchStepMacro = content.findViewById(R.id.switch_step_macro);
+        SwitchCompat switchClickMacro = content.findViewById(R.id.switch_click_macro);
         Button btnRestore = content.findViewById(R.id.btn_restore_defaults);
         Button btnSave = content.findViewById(R.id.btn_save_settings);
 
         MacroConfig.MacroDelays current = MacroConfig.load(this);
         setNumberText(etStartup, current.startupDelayMs);
         setNumberText(etStep, current.stepDelayMs);
+        setNumberText(etStepMacro, MacroConfig.getStepMacroDelayMs(this));
         setNumberText(etDrag, current.dragDurationMs);
         setNumberText(etHold, current.holdDelayMs);
+        if (switchStepMacro != null) {
+            switchStepMacro.setChecked(MacroConfig.isStepMacroEnabled(this));
+        }
+        if (switchClickMacro != null) {
+            switchClickMacro.setChecked(MacroConfig.isClickCaptureEnabled(this));
+        }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(content)
@@ -155,22 +165,37 @@ public class MainActivity extends AppCompatActivity {
             MacroConfig.MacroDelays defaults = MacroConfig.load(this);
             setNumberText(etStartup, defaults.startupDelayMs);
             setNumberText(etStep, defaults.stepDelayMs);
+            setNumberText(etStepMacro, MacroConfig.getStepMacroDelayMs(this));
             setNumberText(etDrag, defaults.dragDurationMs);
             setNumberText(etHold, defaults.holdDelayMs);
+            if (switchStepMacro != null) {
+                switchStepMacro.setChecked(MacroConfig.isStepMacroEnabled(this));
+            }
+            if (switchClickMacro != null) {
+                switchClickMacro.setChecked(MacroConfig.isClickCaptureEnabled(this));
+            }
             Toast.makeText(this, "已恢复初始设定", Toast.LENGTH_SHORT).show();
         });
 
         btnSave.setOnClickListener(v -> {
             Long startup = parseLongOrNull(etStartup);
             Long step = parseLongOrNull(etStep);
+            Long stepMacro = parseLongOrNull(etStepMacro);
             Long drag = parseLongOrNull(etDrag);
             Long hold = parseLongOrNull(etHold);
-            if (startup == null || step == null || drag == null || hold == null) {
+            if (startup == null || step == null || stepMacro == null || drag == null || hold == null) {
                 Toast.makeText(this, "请输入有效的毫秒数", Toast.LENGTH_SHORT).show();
                 return;
             }
 
             MacroConfig.save(this, new MacroConfig.MacroDelays(startup, step, drag, hold));
+            MacroConfig.setStepMacroDelayMs(this, stepMacro);
+            if (switchStepMacro != null) {
+                MacroConfig.setStepMacroEnabled(this, switchStepMacro.isChecked());
+            }
+            if (switchClickMacro != null) {
+                MacroConfig.setClickCaptureEnabled(this, switchClickMacro.isChecked());
+            }
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });

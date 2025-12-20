@@ -60,6 +60,7 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
 
     private MacroState macroState;
     private ClickMacroState clickMacroState;
+    private StepMacroState stepMacroState;
 
     private float buttonCenterX;
     private float buttonCenterY;
@@ -79,6 +80,7 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     private boolean clickCaptureActive = false;
     private boolean clickMacroRunning = false;
     private boolean resumeDragAfterClickCapture = false;
+    private boolean stepMacroRunning = false;
 
     @Override
     public void onCreate() {
@@ -116,7 +118,30 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 cancelClickCaptureInternal("volume_key_cancel");
                 return true;
             }
+            if (!MacroConfig.isClickCaptureEnabled(this)) {
+                return false;
+            }
             startClickCaptureOverlay();
+            return true;
+        }
+        if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN
+                && event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (macroState != null) {
+                Log.d(TAG, "Ignore volume- while drag macro running");
+                return true;
+            }
+            if (isClickCaptureInProgressInternal()) {
+                cancelClickCaptureInternal("volume_down_cancel");
+                return true;
+            }
+            if (stepMacroRunning) {
+                cancelStepMacroIfRunning("volume_down_cancel");
+                return true;
+            }
+            if (!MacroConfig.isStepMacroEnabled(this)) {
+                return false;
+            }
+            runStepMacroSequence(computeButtonCenter());
             return true;
         }
         return super.onKeyEvent(event);
@@ -638,11 +663,57 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         }, state.stepDelayMs);
     }
 
+    private void runStepMacroSequence(PointF buttonCenter) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.e(TAG, "Step macro requires API 24+, current=" + Build.VERSION.SDK_INT);
+            abortStepMacro("api_too_low_step");
+            return;
+        }
+        cancelStepMacroIfRunning("restart");
+        long stepDelayMs = MacroConfig.getStepMacroDelayMs(this);
+        StepMacroState state = new StepMacroState(buttonCenter, stepDelayMs);
+        stepMacroState = state;
+        stepMacroRunning = true;
+        state.timeoutRunnable = () -> abortStepMacro("timeout");
+        handler.postDelayed(state.timeoutRunnable, MACRO_TIMEOUT_MS);
+
+        Log.d(TAG, "Run step macro: stepDelay=" + state.stepDelayMs + "ms, tap=" + buttonCenter + " -> tap");
+
+        state.startRunnable = () -> {
+            if (stepMacroState != state) return;
+            state.afterTap1Fallback = () -> stepMacroTapEnd(state, "tap1_fallback");
+            dispatchTap(buttonCenter, new GestureCallbackAdapter(
+                    () -> stepMacroTapEnd(state, "tap1_completed"),
+                    () -> abortStepMacro("tap1_cancelled")
+            ));
+            handler.postDelayed(state.afterTap1Fallback, TAP_DURATION_MS + 200);
+        };
+        handler.post(state.startRunnable);
+    }
+
+    private void stepMacroTapEnd(StepMacroState state, String trigger) {
+        if (stepMacroState != state || state.tap1Done) return;
+        state.tap1Done = true;
+        if (state.afterTap1Fallback != null) handler.removeCallbacks(state.afterTap1Fallback);
+
+        handler.postDelayed(() -> {
+            if (stepMacroState != state) return;
+            state.afterTap2Fallback = this::finishStepMacro;
+            dispatchTap(state.buttonCenter, new GestureCallbackAdapter(
+                    this::finishStepMacro,
+                    () -> abortStepMacro("tap2_cancelled")
+            ));
+            handler.postDelayed(state.afterTap2Fallback, TAP_DURATION_MS + 200);
+        }, state.stepDelayMs);
+    }
+
     @TargetApi(Build.VERSION_CODES.N)
     private void dispatchTap(PointF point, GestureResultCallback result) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             if (clickMacroRunning) {
                 abortClickMacro("api_too_low_tap");
+            } else if (stepMacroRunning) {
+                abortStepMacro("api_too_low_tap");
             } else {
                 failThisRound("api_too_low_tap");
             }
@@ -661,6 +732,8 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         if (!dispatched) {
             if (clickMacroRunning) {
                 abortClickMacro("gesture_dispatch_failed_tap");
+            } else if (stepMacroRunning) {
+                abortStepMacro("gesture_dispatch_failed_tap");
             } else {
                 failThisRound("gesture_dispatch_failed_tap");
             }
@@ -749,6 +822,12 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         resumeDragAfterClickCapture = false;
     }
 
+    private void abortStepMacro(String reason) {
+        Log.w(TAG, "Step macro aborted: " + reason);
+        cancelStepMacroIfRunning(reason);
+        stepMacroRunning = false;
+    }
+
     private void finishClickMacro() {
         cancelClickMacroIfRunning("finished");
         clickMacroRunning = false;
@@ -758,6 +837,11 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
             startRecordingOverlay();
         }
         resumeDragAfterClickCapture = false;
+    }
+
+    private void finishStepMacro() {
+        cancelStepMacroIfRunning("finished");
+        stepMacroRunning = false;
     }
 
     private void cancelClickMacroIfRunning(String reason) {
@@ -770,6 +854,17 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         if (state.afterTap2Fallback != null) handler.removeCallbacks(state.afterTap2Fallback);
         if (state.afterTap3Fallback != null) handler.removeCallbacks(state.afterTap3Fallback);
         clickMacroState = null;
+    }
+
+    private void cancelStepMacroIfRunning(String reason) {
+        StepMacroState state = stepMacroState;
+        if (state == null) return;
+        Log.d(TAG, "Cancel step macro: " + reason);
+        if (state.timeoutRunnable != null) handler.removeCallbacks(state.timeoutRunnable);
+        if (state.startRunnable != null) handler.removeCallbacks(state.startRunnable);
+        if (state.afterTap1Fallback != null) handler.removeCallbacks(state.afterTap1Fallback);
+        if (state.afterTap2Fallback != null) handler.removeCallbacks(state.afterTap2Fallback);
+        stepMacroState = null;
     }
 
     private void macroStartDragHoldOnce(MacroState state, String trigger) {
@@ -971,6 +1066,23 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
             this.clickPoint = clickPoint;
             this.startupDelayMs = delays.startupDelayMs;
             this.stepDelayMs = delays.stepDelayMs;
+        }
+    }
+
+    private static class StepMacroState {
+        final PointF buttonCenter;
+        final long stepDelayMs;
+
+        boolean tap1Done = false;
+
+        Runnable timeoutRunnable;
+        Runnable startRunnable;
+        Runnable afterTap1Fallback;
+        Runnable afterTap2Fallback;
+
+        StepMacroState(PointF buttonCenter, long stepDelayMs) {
+            this.buttonCenter = buttonCenter;
+            this.stepDelayMs = stepDelayMs;
         }
     }
 

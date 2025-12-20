@@ -14,11 +14,17 @@ public final class MacroConfig {
     public static final String KEY_STEP_DELAY_MS = "macro_step_delay_ms";
     public static final String KEY_DRAG_DURATION_MS = "macro_drag_duration_ms";
     public static final String KEY_HOLD_DELAY_MS = "macro_hold_delay_ms";
+    public static final String KEY_CLICK_CAPTURE_ENABLED = "macro_click_capture_enabled";
+    public static final String KEY_STEP_MACRO_DELAY_MS = "macro_step_macro_delay_ms";
+    public static final String KEY_STEP_MACRO_ENABLED = "macro_step_enabled";
 
     public static final long DEFAULT_STARTUP_DELAY_MS = 30L;
     public static final long DEFAULT_STEP_DELAY_MS = 10L;
     public static final long DEFAULT_DRAG_DURATION_MS = 400L;
     public static final long DEFAULT_HOLD_DELAY_MS = 500L;
+    public static final boolean DEFAULT_CLICK_CAPTURE_ENABLED = true;
+    public static final long DEFAULT_STEP_MACRO_DELAY_MS = 200L;
+    public static final boolean DEFAULT_STEP_MACRO_ENABLED = true;
 
     public static final long MIN_STARTUP_DELAY_MS = 0L;
     public static final long MAX_STARTUP_DELAY_MS = 5000L;
@@ -31,6 +37,9 @@ public final class MacroConfig {
 
     public static final long MIN_HOLD_DELAY_MS = 0L;
     public static final long MAX_HOLD_DELAY_MS = 5000L;
+
+    public static final long MIN_STEP_MACRO_DELAY_MS = 0L;
+    public static final long MAX_STEP_MACRO_DELAY_MS = 5000L;
 
     public static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -57,6 +66,49 @@ public final class MacroConfig {
 
     public static void resetToDefaults(Context context) {
         save(context, new MacroDelays(DEFAULT_STARTUP_DELAY_MS, DEFAULT_STEP_DELAY_MS, DEFAULT_DRAG_DURATION_MS, DEFAULT_HOLD_DELAY_MS));
+        setClickCaptureEnabled(context, DEFAULT_CLICK_CAPTURE_ENABLED);
+        setStepMacroDelayMs(context, DEFAULT_STEP_MACRO_DELAY_MS);
+        setStepMacroEnabled(context, DEFAULT_STEP_MACRO_ENABLED);
+    }
+
+    public static boolean isClickCaptureEnabled(Context context) {
+        if (context == null) return DEFAULT_CLICK_CAPTURE_ENABLED;
+        return prefs(context).getBoolean(KEY_CLICK_CAPTURE_ENABLED, DEFAULT_CLICK_CAPTURE_ENABLED);
+    }
+
+    public static void setClickCaptureEnabled(Context context, boolean enabled) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putBoolean(KEY_CLICK_CAPTURE_ENABLED, enabled)
+                .apply();
+    }
+
+    public static long getStepMacroDelayMs(Context context) {
+        if (context == null) return DEFAULT_STEP_MACRO_DELAY_MS;
+        return clamp(
+                prefs(context).getLong(KEY_STEP_MACRO_DELAY_MS, DEFAULT_STEP_MACRO_DELAY_MS),
+                MIN_STEP_MACRO_DELAY_MS,
+                MAX_STEP_MACRO_DELAY_MS
+        );
+    }
+
+    public static void setStepMacroDelayMs(Context context, long delayMs) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putLong(KEY_STEP_MACRO_DELAY_MS, clamp(delayMs, MIN_STEP_MACRO_DELAY_MS, MAX_STEP_MACRO_DELAY_MS))
+                .apply();
+    }
+
+    public static boolean isStepMacroEnabled(Context context) {
+        if (context == null) return DEFAULT_STEP_MACRO_ENABLED;
+        return prefs(context).getBoolean(KEY_STEP_MACRO_ENABLED, DEFAULT_STEP_MACRO_ENABLED);
+    }
+
+    public static void setStepMacroEnabled(Context context, boolean enabled) {
+        if (context == null) return;
+        prefs(context).edit()
+                .putBoolean(KEY_STEP_MACRO_ENABLED, enabled)
+                .apply();
     }
 
     public static long clamp(long value, long min, long max) {
@@ -77,4 +129,3 @@ public final class MacroConfig {
         }
     }
 }
-
