@@ -63,3 +63,6 @@ TODO 列表（Miao3trike 宏录制改造）
 
 16) 延迟参数可配置（主界面设置）
     - ✅ 在主界面新增“设置”按钮打开二级菜单；提供输入框调整：启动延迟/步骤间延迟/拖动速度/悬停延迟（单位 ms），并提供“保存”“恢复初始设定”。（通过 SharedPreferences 持久化，宏每次启动时读取生效）
+
+17) 同步上游 README 并推送到 fork
+    - ✅ 获取上游最新 README，完全替换本地 `README.md`，提交后推送到 `git@github.com:SuperMaxine/Miao3trikeMod.git`。（已同步 upstream/main）
