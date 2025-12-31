@@ -253,7 +253,8 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
         );
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -334,7 +335,8 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
         );
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -504,8 +506,24 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
         runMacroSequence(buttonCenter, start, end);
     }
 
+    @SuppressLint("Deprecated")
+    private DisplayMetrics getOverlayDisplayMetrics() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        WindowManager wm = overlayWindowManager;
+        if (wm == null) {
+            wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        }
+        if (wm != null && wm.getDefaultDisplay() != null) {
+            wm.getDefaultDisplay().getRealMetrics(metrics);
+            if (metrics.widthPixels > 0 && metrics.heightPixels > 0) {
+                return metrics;
+            }
+        }
+        return getResources().getDisplayMetrics();
+    }
+
     private PointF computeButtonCenter() {
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        DisplayMetrics metrics = getOverlayDisplayMetrics();
         PointF customized = readCustomizedButtonCenter(metrics);
         if (customized != null) {
             return customized;
@@ -550,7 +568,7 @@ public class VolumeKeyAccessibilityService extends AccessibilityService {
     }
 
     private void setButtonCenter(float x, float y, boolean persist) {
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        DisplayMetrics metrics = getOverlayDisplayMetrics();
         float maxX = Math.max(0f, metrics.widthPixels - 1f);
         float maxY = Math.max(0f, metrics.heightPixels - 1f);
         buttonCenterX = clamp(x, 0f, maxX);
