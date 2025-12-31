@@ -1,5 +1,6 @@
 package com.miao3strikemod.matches;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -154,9 +155,11 @@ public class FloatingWindowService extends Service {
             params.gravity = Gravity.TOP | Gravity.START;
 
             // 修改点2：手动计算初始位置（放在屏幕右侧）
-            DisplayMetrics metrics = getResources().getDisplayMetrics();
+            DisplayMetrics metrics = getOverlayDisplayMetrics();
             params.x = metrics.widthPixels - dp2px(80); // 屏幕宽度减去一些边距，初始靠右
             params.y = metrics.heightPixels / 4;        // 初始高度在屏幕 1/4 处
+            params.x = clampInt(params.x, 0, getMaxX());
+            params.y = clampInt(params.y, 0, getMaxY());
 
             setupTouchAndClick();
             updateButtonAppearance(VolumeKeyAccessibilityService.isFunctionEnabled());
@@ -196,8 +199,10 @@ public class FloatingWindowService extends Service {
                     case MotionEvent.ACTION_MOVE:
                         // 修改点3：标准的拖拽计算公式
                         // 因为是 Gravity.TOP | Gravity.START，x/y 就是绝对坐标
-                        params.x = initialX + (int) (event.getRawX() - initialTouchX);
-                        params.y = initialY + (int) (event.getRawY() - initialTouchY);
+                        int nextX = initialX + (int) (event.getRawX() - initialTouchX);
+                        int nextY = initialY + (int) (event.getRawY() - initialTouchY);
+                        params.x = clampInt(nextX, 0, getMaxX());
+                        params.y = clampInt(nextY, 0, getMaxY());
                         windowManager.updateViewLayout(floatingView, params);
                         return true;
 
@@ -208,6 +213,8 @@ public class FloatingWindowService extends Service {
 
                         if (clickDuration < CLICK_DURATION && dx < CLICK_DRIFT && dy < CLICK_DRIFT) {
                             toggleFunction();
+                        } else {
+                            snapToEdge();
                         }
                         return true;
                 }
@@ -249,6 +256,63 @@ public class FloatingWindowService extends Service {
         }
 
         floatingButton.setAlpha(0.7f);
+    }
+
+    @SuppressLint("Deprecated")
+    private DisplayMetrics getOverlayDisplayMetrics() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        WindowManager wm = windowManager;
+        if (wm == null) {
+            wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        }
+        if (wm != null && wm.getDefaultDisplay() != null) {
+            wm.getDefaultDisplay().getRealMetrics(metrics);
+            if (metrics.widthPixels > 0 && metrics.heightPixels > 0) {
+                return metrics;
+            }
+        }
+        return getResources().getDisplayMetrics();
+    }
+
+    private int getFloatingWidthPx() {
+        if (floatingView == null) return dp2px(60);
+        int width = floatingView.getWidth();
+        if (width <= 0) width = floatingView.getMeasuredWidth();
+        if (width <= 0) width = dp2px(60);
+        return width;
+    }
+
+    private int getFloatingHeightPx() {
+        if (floatingView == null) return dp2px(60);
+        int height = floatingView.getHeight();
+        if (height <= 0) height = floatingView.getMeasuredHeight();
+        if (height <= 0) height = dp2px(60);
+        return height;
+    }
+
+    private int getMaxX() {
+        DisplayMetrics metrics = getOverlayDisplayMetrics();
+        return Math.max(0, metrics.widthPixels - getFloatingWidthPx());
+    }
+
+    private int getMaxY() {
+        DisplayMetrics metrics = getOverlayDisplayMetrics();
+        return Math.max(0, metrics.heightPixels - getFloatingHeightPx());
+    }
+
+    private void snapToEdge() {
+        if (params == null || windowManager == null || floatingView == null) return;
+        int maxX = getMaxX();
+        int maxY = getMaxY();
+        int targetX = (params.x <= maxX / 2) ? 0 : maxX;
+        int targetY = clampInt(params.y, 0, maxY);
+        params.x = targetX;
+        params.y = targetY;
+        windowManager.updateViewLayout(floatingView, params);
+    }
+
+    private int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
     }
 
     private int dp2px(int dp) {
